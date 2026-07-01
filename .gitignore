@@ -1,0 +1,20 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# large / generated outputs
+*.nrrd
+*.nii
+*.nii.gz
+*.h5
+
+# os / tooling
+.DS_Store
+.claude/
+
+# never commit secrets
+secrets/
+*.token

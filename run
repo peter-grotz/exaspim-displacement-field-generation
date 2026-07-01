@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Code Ocean entrypoint. Forwards args to the CLI.
+# Examples:
+#   ./run inspect  "/data/transforms/Transform*h.h5"
+#   ./run compose  --transforms "/data/transforms/Transform*h.h5" --ref-grid ccf10 --out /results/field.nrrd
+#   ./run points   --transforms "/data/transforms/Transform*h.h5" --in /data/pts.csv --out /results/warped.csv
+#   ./run calibrate --ref /data/ref_field.nrrd --transforms "/data/transforms/Transform*h.h5"
+set -euo pipefail
+cd "$(dirname "$0")"
+PY="$(command -v python || command -v python3)"
+exec "$PY" -m displacement_field.cli "$@"
