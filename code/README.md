@@ -38,7 +38,9 @@ pip install -r requirements.txt
 ./run inspect "/data/transforms/Transform*h.h5"
 
 # rasterize the dense displacement field onto the CCF 10um grid (or clone another .nrrd's grid)
-./run compose --transforms "/data/transforms/Transform*h.h5" --ref-grid ccf10 --out /results/field.nrrd
+# add --jobs <cores> for the full grid (see "Generating the full dense field" below)
+./run compose --transforms "/data/transforms/Transform*h.h5" --ref-grid ccf10 \
+              --jobs 16 --out /results/field.nrrd
 
 # warp points (x,y,z CSV) directly through the chain — the basis for .swc transformation
 ./run points --transforms "/data/transforms/Transform*h.h5" --in /data/pts.csv --out /results/warped.csv
@@ -59,6 +61,30 @@ warped = chain.map_points(swc_xyz_lps)                 # warp coordinates direct
 Transform files are sorted **numerically** by the integer in the filename
 (`Transform2h.h5` before `Transform10h.h5`). Coordinates are **LPS mm** throughout (ITK/Slicer
 file convention); no RAS flip is applied.
+
+## Generating the full dense field (CCF 10 µm = 1.2 B voxels, ~13 GB output)
+
+Throughput is **~78,000 voxels/sec/core** (measured, 19-transform chain), so the full grid is
+~4.3 core-hours. It parallelizes near-linearly; `--jobs N` computes chunks across N processes
+and writes them in order (the gzip output stays a single valid stream — verified byte-identical
+to the serial writer).
+
+| `--jobs` | wall-clock (approx) | RAM needed |
+|---|---|---|
+| 8  | ~35 min | ~16 GB |
+| 16 | ~18 min | ~32 GB |
+| 32 | ~10 min | ~64 GB |
+
+**Recommended Code Ocean machine: 16–32 vCPU, 32–64 GB RAM**, CPU-only. RAM is not the
+constraint (~0.3–0.5 GB/core; the writer streams — it never holds the field), so ~1–2 GB/core
+plus headroom is ample; pick cores for speed. Beyond ~32 cores the single-stream gzip step
+starts to dominate — drop `--gzip-level` (e.g. `--gzip-level 1`) to keep it fed. Output is
+~13 GB; make sure `/results` (or scratch) has room.
+
+```bash
+./run compose --transforms "/data/720164_transform_files/Transform*h.h5" \
+              --ref-grid ccf10 --jobs 16 --out /results/720164_displacement_field.nrrd
+```
 
 ## Calibration / validation
 

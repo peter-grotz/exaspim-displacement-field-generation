@@ -9,6 +9,7 @@ TRANSFORMS="/data/*/Transform*h.h5"
 # --- sanity check (cheap; keep for the first run) ---
 "$PY" -m displacement_field.cli inspect "$TRANSFORMS"
 
-# --- dense displacement field (HEAVY — see warning below; uncomment when ready) ---
+# --- dense displacement field (HEAVY; uncomment when ready) ---
+# Set --jobs ~= number of vCPUs. Full CCF 10um grid ~10-18 min on 16-32 cores; ~13 GB out.
 # "$PY" -m displacement_field.cli compose --transforms "$TRANSFORMS" \
-#       --ref-grid ccf10 --out /results/displacement_field.nrrd
+#       --ref-grid ccf10 --jobs 16 --out /results/displacement_field.nrrd

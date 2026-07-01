@@ -60,6 +60,16 @@ class ReferenceGrid:
         """Map (M, 3) integer/float indices to (M, 3) world points (LPS mm)."""
         return self.origin[None, :] + idx @ self.directions.T
 
+    def world_for_range(self, start: int, stop: int) -> np.ndarray:
+        """World points (LPS mm) for linear voxel indices [start, stop) in NRRD memory order."""
+        ni, nj, _ = self.size
+        lin = np.arange(start, stop)
+        i = lin % ni
+        j = (lin // ni) % nj
+        k = lin // (ni * nj)
+        idx = np.stack([i, j, k], axis=1).astype(np.float64)
+        return self.world_from_indices(idx)
+
     def iter_chunks(self, chunk: int = 200_000) -> Iterator[Tuple[np.ndarray, np.ndarray]]:
         """Yield (indices (m,3), world (m,3)) covering the whole grid, in NRRD memory order.
 

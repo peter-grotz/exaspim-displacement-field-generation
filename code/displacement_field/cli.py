@@ -53,6 +53,10 @@ def main(argv=None):
     p_cmp.add_argument("--order", default="ascending", choices=["ascending", "descending"])
     p_cmp.add_argument("--inverse", action="store_true",
                        help="apply per-transform inverse (default: forward — the calibrated mode)")
+    p_cmp.add_argument("--jobs", type=int, default=1,
+                       help="parallel worker processes (use ~#cores for the full CCF grid)")
+    p_cmp.add_argument("--chunk", type=int, default=1_000_000, help="voxels per work chunk")
+    p_cmp.add_argument("--gzip-level", type=int, default=6, help="1=fast/larger .. 9=slow/smaller")
 
     p_pts = sub.add_parser("points", help="warp (x,y,z) points through the chain (CSV in/out)")
     p_pts.add_argument("--transforms", nargs="+", required=True)
@@ -81,8 +85,8 @@ def main(argv=None):
         grid = CCF_10UM if args.ref_grid == "ccf10" else ReferenceGrid.from_nrrd_header(args.ref_grid)
         chain = TransformChain.from_files(_expand(args.transforms), order=args.order,
                                           use_inverse=args.inverse)
-        print(f"grid {grid.size} ({grid.n_voxels:,} voxels) -> {args.out}")
-        chain.write_field(grid, args.out)
+        print(f"grid {grid.size} ({grid.n_voxels:,} voxels), jobs={args.jobs} -> {args.out}")
+        chain.write_field(grid, args.out, jobs=args.jobs, chunk=args.chunk, gzip_level=args.gzip_level)
 
     elif args.cmd == "points":
         pts = np.loadtxt(args.inp, delimiter=",", ndmin=2)[:, :3]
