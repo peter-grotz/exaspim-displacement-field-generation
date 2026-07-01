@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Code Ocean entrypoint. Forwards args to the CLI.
-# Examples:
-#   ./run inspect  "/data/transforms/Transform*h.h5"
-#   ./run compose  --transforms "/data/transforms/Transform*h.h5" --ref-grid ccf10 --out /results/field.nrrd
-#   ./run points   --transforms "/data/transforms/Transform*h.h5" --in /data/pts.csv --out /results/warped.csv
-#   ./run calibrate --ref /data/ref_field.nrrd --transforms "/data/transforms/Transform*h.h5"
 set -euo pipefail
 cd "$(dirname "$0")"
 PY="$(command -v python || command -v python3)"
-exec "$PY" -m displacement_field.cli "$@"
+
+# auto-detect the transforms under any attached data asset (one level down)
+TRANSFORMS="/data/*/Transform*h.h5"
+
+# --- sanity check (cheap; keep for the first run) ---
+"$PY" -m displacement_field.cli inspect "$TRANSFORMS"
+
+# --- dense displacement field (HEAVY — see warning below; uncomment when ready) ---
+# "$PY" -m displacement_field.cli compose --transforms "$TRANSFORMS" \
+#       --ref-grid ccf10 --out /results/displacement_field.nrrd

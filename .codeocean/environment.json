@@ -5,5 +5,25 @@
 		"registry_host_arg": true,
 		"git_ask_pass": true,
 		"mount_secrets": true
+	},
+	"installers": {
+		"pip": {
+			"packages": [
+				{
+					"name": "h5py"
+				},
+				{
+					"name": "numpy"
+				},
+				{
+					"name": "pynrrd"
+				},
+				{
+					"name": "scipy"
+				}
+			],
+			"options": {},
+			"pre_install_options": {}
+		}
 	}
 }
