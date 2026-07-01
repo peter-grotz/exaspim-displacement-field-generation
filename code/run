@@ -1,15 +1,34 @@
 #!/usr/bin/env bash
+# Code Ocean entrypoint: generate the dense CCF 10um displacement field from a
+# chain of Slicer TPS transforms attached under /data.
 set -euo pipefail
 cd "$(dirname "$0")"
 PY="$(command -v python || command -v python3)"
 
-# auto-detect the transforms under any attached data asset (one level down)
+# transforms: auto-detected under any attached data asset (one level down)
 TRANSFORMS="/data/*/Transform*h.h5"
 
-# --- sanity check (cheap; keep for the first run) ---
+# use all available cores
+JOBS="$(nproc 2>/dev/null || echo 8)"
+
+# name the output after the sample id in the asset folder (falls back to 'sample')
+ASSET_DIR="$(dirname "$(ls $TRANSFORMS 2>/dev/null | head -1)")"
+SAMPLE="$(basename "${ASSET_DIR:-sample}" | grep -oE '[0-9]{5,}' | head -1)"
+OUT="/results/${SAMPLE:-sample}_displacement_field.nrrd"
+
+echo "transforms : $TRANSFORMS"
+echo "jobs       : $JOBS"
+echo "output     : $OUT"
+
+# sanity check (fast) — confirms the transforms are read in the right order
 "$PY" -m displacement_field.cli inspect "$TRANSFORMS"
 
-# --- dense displacement field (HEAVY; uncomment when ready) ---
-# Set --jobs ~= number of vCPUs. Full CCF 10um grid ~10-18 min on 16-32 cores; ~13 GB out.
-# "$PY" -m displacement_field.cli compose --transforms "$TRANSFORMS" \
-#       --ref-grid ccf10 --jobs 16 --out /results/displacement_field.nrrd
+# dense displacement field on the CCF 10um grid (1.2B voxels, ~13 GB)
+"$PY" -m displacement_field.cli compose \
+    --transforms "$TRANSFORMS" \
+    --ref-grid ccf10 \
+    --jobs "$JOBS" \
+    --gzip-level 1 \
+    --out "$OUT"
+
+echo "done -> $OUT"
