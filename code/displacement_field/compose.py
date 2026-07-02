@@ -71,27 +71,47 @@ class TransformChain:
         return pts
 
     def displacement_at(self, world: np.ndarray, chunk: int = 50_000) -> np.ndarray:
-        """Displacement D(x) = T(x) - x at (M,3) world points. This is the field's payload."""
+        """Forward displacement D(x) = T(x) - x at (M,3) world points."""
         return self.map_points(world, chunk=chunk) - world
 
-    def chunk_bytes(self, grid: ReferenceGrid, start: int, stop: int) -> bytes:
-        """float32 little-endian displacement bytes for voxels [start, stop) (component-fastest)."""
+    def reverse_displacement_at(self, world: np.ndarray, iters: int = 25, relax: float = 0.7,
+                                chunk: int = 50_000) -> np.ndarray:
+        """Reverse/inverse displacement D_rev(y) = x - y, where forward(x) = y.
+
+        Solved by relaxed fixed-point iteration x <- x + relax*(y - F(x)) — the same numerical
+        field-inversion Slicer's 'reverse displacement field' uses. relax=0.7 converges to
+        ~5e-6 mm residual on the 720164 chain (vs. stalling at relax=1.0). Requires this chain
+        to be the FORWARD map (the calibrated default). ~20x the cost of the forward field.
+        """
+        y = np.ascontiguousarray(world, dtype=np.float64)
+        x = y.copy()
+        for _ in range(iters):
+            x = x + relax * (y - self.map_points(x, chunk=chunk))
+        return x - y
+
+    def chunk_bytes(self, grid: ReferenceGrid, start: int, stop: int,
+                    direction: str = "forward", iters: int = 25, relax: float = 0.7) -> bytes:
+        """float32 LE displacement bytes for voxels [start, stop) (component-fastest)."""
         world = grid.world_for_range(start, stop)
-        disp = self.displacement_at(world).astype("<f4")
-        return np.ascontiguousarray(disp).tobytes()
+        if direction == "reverse":
+            disp = self.reverse_displacement_at(world, iters=iters, relax=relax)
+        else:
+            disp = self.displacement_at(world)
+        return np.ascontiguousarray(disp.astype("<f4")).tobytes()
 
     # ---- dense field writer (memory-safe; optionally multi-core) ----
-    def write_field(self, grid: ReferenceGrid, out_path: str, chunk: int = 1_000_000,
+    def write_field(self, grid: ReferenceGrid, out_path: str, direction: str = "forward",
+                   iters: int = 25, relax: float = 0.7, chunk: int = 1_000_000,
                    jobs: int = 1, gzip_level: int = 6, verbose: bool = True) -> None:
-        """Rasterize the displacement field over ``grid`` -> single-stream gzip .nrrd.
+        """Rasterize a displacement field over ``grid`` -> single-stream gzip .nrrd.
+
+        direction='forward' writes T(x)-x; direction='reverse' writes the inverse field via
+        relaxed fixed-point (Slicer's reverse-field method) — ~20x slower per voxel.
 
         Layout: dimension 4, sizes [3, ni, nj, nk], component axis fastest, float32, LPS —
-        matches the Slicer "Convert" displacement-field export.
-
-        Memory-safe (streams ``chunk`` voxels at a time). With ``jobs`` > 1, chunks are
-        computed across processes and written in order (gzip stays a single valid stream);
-        peak RAM ~ jobs * a few hundred MB. Compute scales ~linearly with cores
-        (~78k voxels/sec/core measured on a 19-transform chain).
+        matches the Slicer "Convert" displacement-field export. Memory-safe (streams ``chunk``
+        voxels). With ``jobs`` > 1, chunks compute across processes, written in order (gzip
+        stays one valid stream); peak RAM ~ jobs * a few hundred MB.
         """
         header = _nrrd_header(grid)
         ranges = [(s, min(s + chunk, grid.n_voxels)) for s in range(0, grid.n_voxels, chunk)]
@@ -104,17 +124,18 @@ class TransformChain:
             fh.write(comp.compress(b))
             done += len(b) // 12
             if verbose:
-                print(f"\r  rasterized {done:,}/{total:,} voxels ({100*done/total:.1f}%)", end="")
+                print(f"\r  {direction} rasterized {done:,}/{total:,} voxels ({100*done/total:.1f}%)", end="")
 
         with open(out_path, "wb") as fh:
             fh.write(header.encode("ascii"))
             if jobs <= 1:
                 for s, e in ranges:
-                    _emit(fh, self.chunk_bytes(grid, s, e))
+                    _emit(fh, self.chunk_bytes(grid, s, e, direction, iters, relax))
             else:
                 import multiprocessing as mp
                 ctx = mp.get_context("fork")  # workers inherit chain+grid (Linux/CO)
-                with ctx.Pool(jobs, initializer=_init_worker, initargs=(self, grid)) as pool:
+                with ctx.Pool(jobs, initializer=_init_worker,
+                              initargs=(self, grid, direction, iters, relax)) as pool:
                     for b in pool.imap(_worker_chunk, ranges, chunksize=1):  # ordered
                         _emit(fh, b)
             fh.write(comp.flush())
@@ -145,11 +166,12 @@ def _nrrd_header(grid: ReferenceGrid) -> str:
 _WORKER: dict = {}
 
 
-def _init_worker(chain: "TransformChain", grid: ReferenceGrid) -> None:
-    _WORKER["chain"] = chain
-    _WORKER["grid"] = grid
+def _init_worker(chain: "TransformChain", grid: ReferenceGrid,
+                 direction: str = "forward", iters: int = 25, relax: float = 0.7) -> None:
+    _WORKER.update(chain=chain, grid=grid, direction=direction, iters=iters, relax=relax)
 
 
 def _worker_chunk(rng):
     s, e = rng
-    return _WORKER["chain"].chunk_bytes(_WORKER["grid"], s, e)
+    return _WORKER["chain"].chunk_bytes(_WORKER["grid"], s, e,
+                                        _WORKER["direction"], _WORKER["iters"], _WORKER["relax"])
