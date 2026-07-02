@@ -2,8 +2,16 @@
 	"version": 1,
 	"attached_datasets": [
 		{
+			"id": "023c6e68-464b-45ed-aec4-c130cb400dde",
+			"mount": "720164_displacement_field_automated"
+		},
+		{
 			"id": "9c310fd3-ce1f-4360-96bc-e75a4aa2dcf3",
 			"mount": "720164_transform_files"
+		},
+		{
+			"id": "b15bcbd5-cab4-4135-9f26-fff6c98b587f",
+			"mount": "720164_10um_to_ccf_moved"
 		}
 	]
 }
