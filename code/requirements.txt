@@ -3,6 +3,7 @@ numpy>=1.23
 scipy>=1.10          # scipy.spatial.distance.cdist (TPS kernel + Jacobian)
 h5py>=3.0            # read Slicer InverseThinPlateSplineKernelTransform .h5
 pynrrd>=1.0          # imported as `nrrd` — read/write .nrrd displacement fields
+nibabel>=5.0         # load .nii/.nii.gz volumes for the roundtrip resampler
 
 # Optional (only for the ITK-parity unit test; not needed at runtime):
 # itk>=5.3
