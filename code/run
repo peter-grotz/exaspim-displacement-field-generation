@@ -1,34 +1,40 @@
 #!/usr/bin/env bash
-# Code Ocean entrypoint: generate the dense CCF 10um displacement field from a
-# chain of Slicer TPS transforms attached under /data.
+# Code Ocean entrypoint: ROUND-TRIP VALIDATION.
+# Generates the inverse displacement field, forward-warps the sample volume, then inverse-warps
+# it back — saving all three assets to /results. Auto-detects inputs from attached data assets:
+#   - transforms:   /data/*/Transform*h.h5
+#   - forward field: a *displacement_field*.nrrd under /data (excluding inverse/reverse)
+#   - sample volume: a .nii/.nii.gz (or *moved*.nrrd) under /data, on the field's grid
 set -euo pipefail
 cd "$(dirname "$0")"
 PY="$(command -v python || command -v python3)"
-
-# transforms: auto-detected under any attached data asset (one level down)
-TRANSFORMS="/data/*/Transform*h.h5"
-
-# use all available cores
 JOBS="$(nproc 2>/dev/null || echo 8)"
 
-# name the output after the sample id in the asset folder (falls back to 'sample')
-ASSET_DIR="$(dirname "$(ls $TRANSFORMS 2>/dev/null | head -1)")"
-SAMPLE="$(basename "${ASSET_DIR:-sample}" | grep -oE '[0-9]{5,}' | head -1)"
-OUT="/results/${SAMPLE:-sample}_displacement_field.nrrd"
+TRANSFORMS="/data/*/Transform*h.h5"
+FIELD="$(find /data -maxdepth 3 -iname '*displacement_field*.nrrd' 2>/dev/null | grep -viE 'inverse|reverse' | head -1)"
+VOLUME="$(find /data -maxdepth 3 \( -iname '*.nii' -o -iname '*.nii.gz' \) 2>/dev/null | head -1)"
+[ -z "$VOLUME" ] && VOLUME="$(find /data -maxdepth 3 -iname '*moved*.nrrd' 2>/dev/null | head -1)"
 
 echo "transforms : $TRANSFORMS"
+echo "field      : ${FIELD:-<none found>}"
+echo "volume     : ${VOLUME:-<none found>}"
 echo "jobs       : $JOBS"
-echo "output     : $OUT"
 
-# sanity check (fast) — confirms the transforms are read in the right order
-"$PY" -m displacement_field.cli inspect "$TRANSFORMS"
+if [ -z "$FIELD" ] || [ -z "$VOLUME" ]; then
+  echo "ERROR: roundtrip needs a forward displacement field (*displacement_field*.nrrd) AND a" >&2
+  echo "       sample volume (.nii/.nii.gz or *moved*.nrrd) attached under /data." >&2
+  exit 1
+fi
 
-# dense displacement field on the CCF 10um grid (1.2B voxels, ~13 GB)
-"$PY" -m displacement_field.cli compose \
+"$PY" -m displacement_field.cli roundtrip \
     --transforms "$TRANSFORMS" \
-    --ref-grid ccf10 \
-    --jobs "$JOBS" \
-    --gzip-level 1 \
-    --out "$OUT"
+    --field "$FIELD" \
+    --volume "$VOLUME" \
+    --out-dir /results \
+    --jobs "$JOBS"
 
-echo "done -> $OUT"
+echo "done -> /results/{inverse_displacement_field,transformed_volume,reverse_transformed_volume}.nrrd"
+
+# --- To go back to plain forward-field generation instead, comment out the block above and use: ---
+# "$PY" -m displacement_field.cli compose --transforms "$TRANSFORMS" --ref-grid ccf10 \
+#     --jobs "$JOBS" --gzip-level 1 --out "/results/displacement_field.nrrd"
