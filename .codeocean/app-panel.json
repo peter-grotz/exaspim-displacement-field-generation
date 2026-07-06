@@ -1,0 +1,25 @@
+{
+	"version": 1,
+	"parameters": [
+		{
+			"id": "fA847XoYT2oxMoT8",
+			"name": "transform_folder",
+			"type": "text",
+			"value_type": "string",
+			"required": true
+		},
+		{
+			"id": "jcuae7PwNWUanDTq",
+			"name": "input_volume",
+			"type": "text",
+			"value_type": "string",
+			"required": true
+		},
+		{
+			"id": "LK3i55RNnGK8SNLj",
+			"name": "sample_ID",
+			"type": "text",
+			"value_type": "string"
+		}
+	]
+}
