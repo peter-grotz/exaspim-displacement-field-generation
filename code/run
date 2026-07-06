@@ -24,7 +24,10 @@ export NUMEXPR_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 
 PY="$(command -v python || command -v python3)"
-JOBS="$(nproc 2>/dev/null || echo 8)"
+# Size jobs from the INSTALLED core count (nproc --all), not `nproc`: CO may launch this run
+# pinned to 1 CPU, which makes plain `nproc` report 1. The Python entrypoint re-expands CPU
+# affinity to all cores (see displacement_field/__init__.py) so the pool actually uses them.
+JOBS="${JOBS:-$(nproc --all 2>/dev/null || nproc 2>/dev/null || echo 8)}"
 
 TRANSFORMS="${1:-${TRANSFORMS_S3:-}}"
 VOLUME="${2:-${VOLUME_S3:-}}"
@@ -44,7 +47,7 @@ fi
 echo "transforms : ${TRANSFORMS:-<none>}"
 echo "volume     : ${VOLUME:-<none>}"
 echo "sample id  : ${SAMPLE:-<infer>}"
-echo "jobs       : $JOBS"
+echo "jobs       : $JOBS  (nproc=$(nproc 2>/dev/null) all=$(nproc --all 2>/dev/null))"
 
 if [ -z "$TRANSFORMS" ] || [ -z "$VOLUME" ]; then
   echo "ERROR: need a transform folder ($1/TRANSFORMS_S3) and an input volume ($2/VOLUME_S3)." >&2
