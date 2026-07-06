@@ -62,6 +62,35 @@ Transform files are sorted **numerically** by the integer in the filename
 (`Transform2h.h5` before `Transform10h.h5`). Coordinates are **LPS mm** throughout (ITK/Slicer
 file convention); no RAS flip is applied.
 
+## App Panel — Reproducible Run (finalize pipeline)
+
+The Code Ocean **`run`** entrypoint drives the one-shot `finalize` pipeline: from a transform
+folder + input volume it produces the four sample artifacts to `/results`:
+
+| output | what |
+|---|---|
+| `<sampleID>_manual_displacement_field.nrrd` | forward field `T(x)−x` on the CCF grid |
+| `<sampleID>_manual_inverse_displacement_field.nrrd` | inverse field (relaxed fixed-point) — the expensive step |
+| `<sampleID>_transformed_final.nii.gz` | input volume forward-warped |
+| `<sampleID>_inverted_transform.nii.gz` | transformed volume inverse-warped (round-trip) |
+
+**App Panel parameters** are UI-defined (App Builder) and map to `run`'s positional args in
+top-to-bottom order. Create three **Text** parameters, in this exact order:
+
+| # | Display name | maps to | Default | Notes |
+|---|---|---|---|---|
+| 1 | Transforms folder (S3 URI or blank) | `$1` | *(blank)* | `s3://…/ccf_alignment/transforms`; blank → attached `*_transform_files` asset |
+| 2 | Input volume (S3 URI or blank) | `$2` | *(blank)* | `s3://…/registration_metadata/<sid>_10um_to_ccf_moved.nii.gz`; blank → attached `*_10um_to_ccf_moved` asset |
+| 3 | Sample ID (optional) | `$3` | *(blank)* | override; else inferred from the paths |
+
+Each parameter accepts an `s3://` URI (staged anonymously from `aind-open-data`) **or** may be
+left blank to use the data asset mounted under `/data`. Then hit **Reproducible Run**.
+
+Performance: the inverse field is ~95% of the cost and runs across all cores with BLAS threads
+capped to one per worker (avoids the oversubscription that once turned a ~2 h job into 60 h).
+Both fields and both warps parallelize across `nproc`. On the pinned `c6a.16xlarge` (64 vCPU),
+expect **~2–2.5 h / ~$5** for the full CCF 10 µm grid.
+
 ## Generating the full dense field (CCF 10 µm = 1.2 B voxels, ~13 GB output)
 
 Throughput is **~78,000 voxels/sec/core** (measured, 19-transform chain), so the full grid is
