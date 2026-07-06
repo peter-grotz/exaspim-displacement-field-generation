@@ -6,6 +6,14 @@ Public API:
     TransformChain                 (compose)
     sample_reference, calibrate    (validate)
 """
+# Cap BLAS threads to 1 BEFORE numpy is imported. We parallelize with processes (--jobs); if each
+# worker also multi-threads BLAS you get N x N thread oversubscription and the CPU thrashes
+# (this turned a ~2h job into 60h). Must run before the numpy import below.
+import os as _os
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    _os.environ.setdefault(_v, "1")
+
 from .tps import SlicerTPS, load_tps, peek_type
 from .grids import ReferenceGrid, CCF_10UM
 from .compose import TransformChain

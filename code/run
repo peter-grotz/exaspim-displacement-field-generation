@@ -7,6 +7,16 @@
 #   - sample volume: a .nii/.nii.gz (or *moved*.nrrd) under /data, on the field's grid
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# CRITICAL for performance: one BLAS thread per worker. Without this, each of the N worker
+# processes spawns N BLAS threads (N x N oversubscription) and the CPU thrashes — this alone
+# turned a ~2h job into 60h on a 64-core machine. The N *processes* provide the parallelism.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
+
 PY="$(command -v python || command -v python3)"
 JOBS="$(nproc 2>/dev/null || echo 8)"
 
