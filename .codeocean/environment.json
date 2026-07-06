@@ -10,10 +10,6 @@
 		"pip": {
 			"packages": [
 				{
-					"name": "boto3",
-					"version": "1.35.0"
-				},
-				{
 					"name": "h5py",
 					"version": "3.16.0"
 				},

@@ -14,10 +14,9 @@ from __future__ import annotations
 import os
 from typing import List, Tuple
 
-import boto3
-from botocore import UNSIGNED
-from botocore.client import Config
-from botocore.exceptions import ClientError
+# NOTE: boto3/botocore are imported lazily (inside the functions that hit S3), so importing this
+# module — and running the finalize pipeline against LOCAL/attached /data inputs — does NOT
+# require boto3 to be installed. Only actual s3:// downloads pull it in.
 
 
 def parse_s3_uri(uri: str) -> Tuple[str, str]:
@@ -34,6 +33,9 @@ def is_s3(path: str) -> bool:
 
 
 def _client(anonymous: bool):
+    import boto3
+    from botocore import UNSIGNED
+    from botocore.client import Config
     if anonymous:
         return boto3.client("s3", config=Config(signature_version=UNSIGNED))
     return boto3.client("s3")
@@ -41,6 +43,7 @@ def _client(anonymous: bool):
 
 def _with_fallback(fn):
     """Try anonymous first; on AccessDenied/403 retry with signed credentials."""
+    from botocore.exceptions import ClientError
     try:
         return fn(_client(anonymous=True))
     except ClientError as e:
