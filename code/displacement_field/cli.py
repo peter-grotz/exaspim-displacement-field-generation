@@ -85,6 +85,21 @@ def main(argv=None):
     p_rt.add_argument("--chunk", type=int, default=1_000_000)
     p_rt.add_argument("--gzip-level", type=int, default=1)
 
+    p_fin = sub.add_parser("finalize",
+                           help="full pipeline -> 4 named artifacts from a transform folder + input volume "
+                                "(both may be local paths or s3:// URIs)")
+    p_fin.add_argument("--transforms-dir", required=True, help="folder (or s3:// prefix) of Transform*.h5")
+    p_fin.add_argument("--volume", required=True, help="input moved volume (.nii.gz, local or s3://)")
+    p_fin.add_argument("--out-dir", required=True)
+    p_fin.add_argument("--sample-id", default=None, help="override; else inferred from paths")
+    p_fin.add_argument("--jobs", type=int, default=1, help="worker processes (use ~#cores)")
+    p_fin.add_argument("--order", default="ascending", choices=["ascending", "descending"])
+    p_fin.add_argument("--inv-iters", type=int, default=25)
+    p_fin.add_argument("--inv-relax", type=float, default=0.7)
+    p_fin.add_argument("--chunk", type=int, default=1_000_000)
+    p_fin.add_argument("--gzip-level", type=int, default=1)
+    p_fin.add_argument("--stage-dir", default=None, help="where to download s3 inputs (default: <out-dir>/_staging)")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "inspect":
@@ -144,6 +159,86 @@ def main(argv=None):
                     chunk=args.chunk, gzip_level=args.gzip_level)
 
         print(f"done. saved:\n  {inv_field}\n  {fwd_vol}\n  {rev_vol}")
+
+    elif args.cmd == "finalize":
+        _finalize(args)
+
+
+def _finalize(args):
+    """Generate the four required artifacts for one sample.
+
+    [1/4] forward displacement field   (T(x)-x on the CCF grid)          -> _manual_displacement_field.nrrd
+    [2/4] inverse displacement field   (relaxed fixed-point inversion)   -> _manual_inverse_displacement_field.nrrd
+    [3/4] transformed volume           (forward-warp the input)          -> _transformed_final.nii.gz
+    [4/4] inverted volume              (inverse-warp the transformed)    -> _inverted_transform.nii.gz
+
+    Fields (steps 1-2) run first, while no 5 GB volume array is held, so peak RAM stays low during
+    the parallel field passes. The expensive step is [2/4]; both fields and both warps parallelize
+    across --jobs.
+    """
+    import time
+    from .naming import infer_sample_id, output_names
+    from .resample import warp_volume_array, load_volume_affine, write_nifti
+    from . import s3_stage
+
+    stage_dir = args.stage_dir or os.path.join(args.out_dir, "_staging")
+
+    transforms_dir = args.transforms_dir
+    volume_path = args.volume
+    if s3_stage.is_s3(transforms_dir):
+        print(f"[stage] transforms <- {transforms_dir}")
+        transforms_dir = s3_stage.stage_transforms(transforms_dir, os.path.join(stage_dir, "transforms"))
+    if s3_stage.is_s3(volume_path):
+        print(f"[stage] volume     <- {volume_path}")
+        volume_path = s3_stage.stage_volume(volume_path, stage_dir)
+
+    tfiles = [f for f in _expand([os.path.join(transforms_dir, "*")]) if f.lower().endswith(".h5")]
+    if not tfiles:
+        sys.exit(f"ERROR: no *.h5 transforms found in {transforms_dir}")
+
+    sid = args.sample_id or infer_sample_id(volume_path, transforms_dir, tfiles[0])
+    if not sid:
+        sys.exit("ERROR: could not infer sample id from paths; pass --sample-id")
+    names = output_names(sid)
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    grid = CCF_10UM
+    fwd_field = os.path.join(args.out_dir, names["forward_field"])
+    inv_field = os.path.join(args.out_dir, names["inverse_field"])
+    tr_vol = os.path.join(args.out_dir, names["transformed"])
+    iv_vol = os.path.join(args.out_dir, names["inverted"])
+
+    chain = TransformChain.from_files(tfiles, order=args.order)
+    print(f"sample {sid}: {len(tfiles)} transform(s), grid {grid.size} "
+          f"({grid.n_voxels:,} voxels), jobs={args.jobs}")
+    t0 = time.time()
+
+    print(f"[1/4] forward field  -> {fwd_field}")
+    chain.write_field(grid, fwd_field, direction="forward", jobs=args.jobs,
+                      chunk=args.chunk, gzip_level=args.gzip_level)
+    t1 = time.time(); print(f"      ({t1 - t0:.0f}s)")
+
+    print(f"[2/4] inverse field  -> {inv_field}   (expensive step)")
+    chain.write_field(grid, inv_field, direction="reverse", iters=args.inv_iters,
+                      relax=args.inv_relax, jobs=args.jobs, chunk=args.chunk, gzip_level=args.gzip_level)
+    t2 = time.time(); print(f"      ({t2 - t1:.0f}s)")
+
+    print(f"[3/4] transformed    -> {tr_vol}")
+    vol, affine, header = load_volume_affine(volume_path, grid)
+    transformed = warp_volume_array(vol, grid, fwd_field, jobs=args.jobs)
+    write_nifti(transformed, affine, tr_vol, header)
+    del vol
+    t3 = time.time(); print(f"      ({t3 - t2:.0f}s)")
+
+    print(f"[4/4] inverted       -> {iv_vol}")
+    inverted = warp_volume_array(transformed, grid, inv_field, jobs=args.jobs)
+    write_nifti(inverted, affine, iv_vol, header)
+    t4 = time.time(); print(f"      ({t4 - t3:.0f}s)")
+
+    print(f"\ndone in {(t4 - t0)/60:.1f} min. saved to {args.out_dir}:")
+    for p in (fwd_field, inv_field, tr_vol, iv_vol):
+        sz = os.path.getsize(p) if os.path.exists(p) else 0
+        print(f"  {os.path.basename(p)}  ({sz/1e9:.2f} GB)")
 
 
 if __name__ == "__main__":

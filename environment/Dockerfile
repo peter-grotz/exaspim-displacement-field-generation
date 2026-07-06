@@ -7,6 +7,7 @@ ARG GIT_ASKPASS
 COPY git-ask-pass /
 
 RUN pip install -U --no-cache-dir \
+    boto3==1.35.0 \
     h5py==3.16.0 \
     nibabel==5.4.2 \
     numpy==2.5.0 \

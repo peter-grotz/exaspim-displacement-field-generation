@@ -106,3 +106,111 @@ def load_volume(path: str, grid: ReferenceGrid) -> np.ndarray:
         raise ValueError(f"volume {path} shape {arr.shape} != field grid {grid.size}; "
                          "the volume must be on the same grid as the displacement field")
     return np.ascontiguousarray(arr, dtype=np.float32)
+
+
+# ---- NIfTI output path: warp into an in-memory array (optionally multi-core), write .nii.gz ----
+#
+# The dense warps are embarrassingly parallel over output voxels: each voxel independently reads
+# its displacement D(y), converts it to an index offset, and trilinear-samples the (shared,
+# read-only) input volume. The field is gzip and not seekable, so the MAIN process decompresses
+# it serially (cheap, ~tens of seconds for the whole field) and hands each chunk to a fork-pool
+# worker for the map_coordinates work. Workers inherit the volume via copy-on-write fork — no
+# per-worker copy of the ~5 GB volume.
+
+def _warp_chunk(volume, size, inv_dirs_T, start, D, order, cval):
+    ni, nj, _ = size
+    m = len(D)
+    lin = np.arange(start, start + m)
+    i = lin % ni
+    j = (lin // ni) % nj
+    k = lin // (ni * nj)
+    samp = np.stack([i, j, k], axis=1).astype(np.float64) + D @ inv_dirs_T  # (m,3) index coords
+    return map_coordinates(volume, samp.T, order=order, mode="constant", cval=cval).astype(np.float32)
+
+
+_WARP: dict = {}
+
+
+def _init_warp(volume, size, inv_dirs_T, order, cval):
+    _WARP.update(volume=volume, size=size, inv=inv_dirs_T, order=order, cval=cval)
+
+
+def _warp_worker(item):
+    start, D = item
+    vals = _warp_chunk(_WARP["volume"], _WARP["size"], _WARP["inv"], start, D,
+                       _WARP["order"], _WARP["cval"])
+    return start, vals
+
+
+def warp_volume_array(volume: np.ndarray, grid: ReferenceGrid, field_path: str,
+                      jobs: int = 1, order: int = 1, cval: float = 0.0,
+                      chunk: int = 2_000_000, verbose: bool = True) -> np.ndarray:
+    """Resample ``volume`` through the displacement field, returning the (ni,nj,nk) array.
+
+    Same math as ``warp_volume`` but returns an array (for NIfTI writing) instead of streaming to
+    .nrrd, and parallelizes the per-chunk resampling across ``jobs`` processes.
+    """
+    if tuple(volume.shape) != tuple(grid.size):
+        raise ValueError(f"volume shape {volume.shape} != grid {grid.size}")
+    volume = np.ascontiguousarray(volume, dtype=np.float32)
+    inv_dirs_T = np.linalg.inv(grid.directions).T
+    total = grid.n_voxels
+    out = np.empty(total, dtype=np.float32)   # linear (i-fastest) buffer
+    done = 0
+
+    def _place(start, vals):
+        nonlocal done
+        out[start:start + len(vals)] = vals
+        done += len(vals)
+        if verbose:
+            print(f"\r  warped {done:,}/{total:,} voxels ({100*done/total:.1f}%)", end="")
+
+    if jobs <= 1:
+        for start, D in _stream_field(field_path, chunk):
+            _place(start, _warp_chunk(volume, grid.size, inv_dirs_T, start, D, order, cval))
+    else:
+        import multiprocessing as mp
+        ctx = mp.get_context("fork")  # workers inherit `volume` copy-on-write (Linux/CO)
+        with ctx.Pool(jobs, initializer=_init_warp,
+                      initargs=(volume, grid.size, inv_dirs_T, order, cval)) as pool:
+            for start, vals in pool.imap_unordered(_warp_worker,
+                                                   _stream_field(field_path, chunk), chunksize=1):
+                _place(start, vals)
+    if verbose:
+        print()
+    return out.reshape(grid.size, order="F")   # i-fastest linear -> (ni,nj,nk)
+
+
+def load_volume_affine(path: str, grid: ReferenceGrid):
+    """Load a volume as (array, affine, header). NIfTI keeps its own affine; .nrrd derives one
+    from the grid (LPS->RAS). Shape must match ``grid.size``."""
+    if path.endswith((".nii", ".nii.gz")):
+        import nibabel as nib
+        img = nib.load(path)
+        arr = np.asarray(img.dataobj, dtype=np.float32)
+        affine, header = img.affine, img.header
+    else:
+        arr = load_volume(path, grid)
+        affine, header = grid_to_nifti_affine(grid), None
+    if tuple(arr.shape) != tuple(grid.size):
+        raise ValueError(f"volume {path} shape {arr.shape} != grid {grid.size}")
+    return np.ascontiguousarray(arr, dtype=np.float32), affine, header
+
+
+def grid_to_nifti_affine(grid: ReferenceGrid) -> np.ndarray:
+    """Build a NIfTI (RAS) affine from an LPS reference grid: flip x,y signs of the LPS affine."""
+    a = np.eye(4)
+    a[:3, :3] = grid.directions
+    a[:3, 3] = grid.origin
+    lps_to_ras = np.diag([-1.0, -1.0, 1.0, 1.0])
+    return lps_to_ras @ a
+
+
+def write_nifti(arr: np.ndarray, affine, out_path: str, header=None) -> None:
+    """Write a float32 volume as a gzip-compressed .nii.gz (reusing the input header if given)."""
+    import nibabel as nib
+    arr = np.ascontiguousarray(arr, dtype=np.float32)
+    img = nib.Nifti1Image(arr, affine, header)
+    img.set_data_dtype(np.float32)
+    img.header.set_slope_inter(1.0, 0.0)   # no intensity scaling
+    nib.save(img, out_path)
