@@ -13,6 +13,7 @@ import argparse
 import glob
 import os
 import re
+import shutil
 import sys
 
 import numpy as np
@@ -28,6 +29,19 @@ def _natkey(s):
     """Natural sort key: order by the first integer in the basename (Transform2h < Transform10h)."""
     m = re.search(r"(\d+)", s.rsplit("/", 1)[-1])
     return (int(m.group(1)) if m else 0, s)
+
+
+def _emit_transforms(tfiles, out_dir, sid):
+    """Copy the transforms actually used into <out_dir>/<sid>_transforms/transform_1..N.h5.
+
+    ``tfiles`` is already in APPLIED order (natural sort by filename integer), so transform_1.h5
+    is the first-applied transform. Provides self-contained provenance alongside the fields.
+    """
+    tdir = os.path.join(out_dir, f"{sid}_transforms")
+    os.makedirs(tdir, exist_ok=True)
+    for i, src in enumerate(tfiles, start=1):
+        shutil.copy2(src, os.path.join(tdir, f"transform_{i}.h5"))
+    return tdir
 
 
 def _expand(paths):
@@ -208,6 +222,10 @@ def _finalize(args):
     tr_vol = os.path.join(args.out_dir, names["transformed"])
     iv_vol = os.path.join(args.out_dir, names["inverted"])
 
+    # Provenance: copy the exact transforms used (applied order) -> <sid>_transforms/transform_N.h5
+    tdir = _emit_transforms(tfiles, args.out_dir, sid)
+    print(f"[transforms] copied {len(tfiles)} -> {tdir}/transform_1..{len(tfiles)}.h5")
+
     chain = TransformChain.from_files(tfiles, order=args.order)
     print(f"sample {sid}: {len(tfiles)} transform(s), grid {grid.size} "
           f"({grid.n_voxels:,} voxels), jobs={args.jobs}")
@@ -239,6 +257,7 @@ def _finalize(args):
     for p in (fwd_field, inv_field, tr_vol, iv_vol):
         sz = os.path.getsize(p) if os.path.exists(p) else 0
         print(f"  {os.path.basename(p)}  ({sz/1e9:.2f} GB)")
+    print(f"  {os.path.basename(tdir)}/  ({len(tfiles)} transforms: transform_1..{len(tfiles)}.h5)")
 
 
 if __name__ == "__main__":

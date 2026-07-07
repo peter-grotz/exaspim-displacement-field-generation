@@ -73,6 +73,7 @@ folder + input volume it produces the four sample artifacts to `/results`:
 | `<sampleID>_manual_inverse_displacement_field.nrrd` | inverse field (relaxed fixed-point) — the expensive step |
 | `<sampleID>_transformed_final.nii.gz` | input volume forward-warped |
 | `<sampleID>_inverted_transform.nii.gz` | transformed volume inverse-warped (round-trip) |
+| `<sampleID>_transforms/transform_1..N.h5` | the exact transforms used, renamed in applied order (provenance) |
 
 **App Panel parameters** are UI-defined (App Builder) and map to `run`'s positional args in
 top-to-bottom order. Create three **Text** parameters, in this exact order:
