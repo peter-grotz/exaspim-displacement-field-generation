@@ -78,14 +78,17 @@ folder + input volume it produces the four sample artifacts to `/results`:
 **App Panel parameters** are UI-defined (App Builder) and map to `run`'s positional args in
 top-to-bottom order. Create three **Text** parameters, in this exact order:
 
-| # | Display name | maps to | Default | Notes |
+| # | Display name | maps to | Required | Example |
 |---|---|---|---|---|
-| 1 | Transforms folder (S3 URI or blank) | `$1` | *(blank)* | `s3://…/ccf_alignment/transforms`; blank → attached `*_transform_files` asset |
-| 2 | Input volume (S3 URI or blank) | `$2` | *(blank)* | `s3://…/registration_metadata/<sid>_10um_to_ccf_moved.nii.gz`; blank → attached `*_10um_to_ccf_moved` asset |
-| 3 | Sample ID (optional) | `$3` | *(blank)* | override; else inferred from the paths |
+| 1 | Transforms folder | `$1` | **yes** | `/data/794491_transforms` (mounted asset) or `s3://…/transforms` |
+| 2 | Input volume | `$2` | **yes** | `/data/794491_10um_to_ccf_moved/794491_10um_to_ccf_moved.nii.gz` or the matching `s3://` URI |
+| 3 | Sample ID | `$3` | no | override; else inferred from the paths |
 
-Each parameter accepts an `s3://` URI (staged anonymously from `aind-open-data`) **or** may be
-left blank to use the data asset mounted under `/data`. Then hit **Reproducible Run**.
+The parameters are **authoritative** — the capsule reads exactly what you point them at. Each
+accepts a mounted `/data/<asset>/…` path **or** an `s3://` URI (staged anonymously from
+`aind-open-data`). There is **no `/data` auto-detection**: with several samples' assets mounted,
+guessing would silently read the wrong sample, so a blank required field is an error. Point each
+parameter at the specific sample you're running, then hit **Reproducible Run**.
 
 Performance: the inverse field is ~95% of the cost and runs across all cores with BLAS threads
 capped to one per worker (avoids the oversubscription that once turned a ~2 h job into 60 h).

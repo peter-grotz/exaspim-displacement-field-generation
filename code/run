@@ -6,10 +6,13 @@
 #   <sampleID>_transformed_final.nii.gz
 #   <sampleID>_inverted_transform.nii.gz
 #
-# App Panel parameters (positional — must match the App Builder order top-to-bottom; each may be
-# left blank to fall back to an attached /data data asset):
-#   $1 / TRANSFORMS_S3 : s3:// prefix (or local dir) holding the manual Transform*.h5 files
-#   $2 / VOLUME_S3     : s3:// URI (or local path) of <sampleID>_10um_to_ccf_moved.nii.gz
+# App Panel parameters (positional — must match the App Builder order top-to-bottom). These are
+# AUTHORITATIVE: the capsule reads exactly what you point it at. There is NO /data auto-detection —
+# with several samples' assets mounted under /data, guessing would silently read the wrong sample.
+#   $1 / TRANSFORMS_S3 : REQUIRED — the transform folder to read, e.g. /data/<sample>_transforms
+#                        (a mounted data asset) or an s3:// prefix of the manual Transform*.h5 files
+#   $2 / VOLUME_S3     : REQUIRED — /data/<sample>_10um_to_ccf_moved/<sample>_10um_to_ccf_moved.nii.gz
+#                        (a mounted data asset) or an s3:// URI
 #   $3 / SAMPLE_ID     : optional sample-id override (else inferred from the paths)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -33,26 +36,18 @@ TRANSFORMS="${1:-${TRANSFORMS_S3:-}}"
 VOLUME="${2:-${VOLUME_S3:-}}"
 SAMPLE="${3:-${SAMPLE_ID:-}}"
 
-# Blank parameter -> fall back to an attached data asset under /data (so leaving a field empty in
-# the App Panel uses the mounted asset instead of erroring).
-if [ -z "$TRANSFORMS" ]; then
-  H5="$(find /data -maxdepth 3 -iname '*.h5' 2>/dev/null | head -1)"
-  [ -n "$H5" ] && TRANSFORMS="$(dirname "$H5")"
-fi
-if [ -z "$VOLUME" ]; then
-  VOLUME="$(find /data -maxdepth 3 -iname '*10um_to_ccf_moved.nii.gz' 2>/dev/null | head -1)"
-  [ -z "$VOLUME" ] && VOLUME="$(find /data -maxdepth 3 \( -iname '*.nii' -o -iname '*.nii.gz' \) 2>/dev/null | head -1)"
-fi
-
-echo "transforms : ${TRANSFORMS:-<none>}"
-echo "volume     : ${VOLUME:-<none>}"
+echo "transforms : ${TRANSFORMS:-<MISSING>}"
+echo "volume     : ${VOLUME:-<MISSING>}"
 echo "sample id  : ${SAMPLE:-<infer>}"
 echo "jobs       : $JOBS  (nproc=$(nproc 2>/dev/null) all=$(nproc --all 2>/dev/null))"
 
+# Authoritative parameters: a blank required field is an error, never a guess. This prevents
+# silently reading a different sample's transforms/volume when multiple assets are mounted.
 if [ -z "$TRANSFORMS" ] || [ -z "$VOLUME" ]; then
-  echo "ERROR: need a transform folder ($1/TRANSFORMS_S3) and an input volume ($2/VOLUME_S3)." >&2
-  echo "       e.g. run  s3://aind-open-data/exaSPIM_720164_.../ccf_alignment/transforms  \\" >&2
-  echo "                 s3://aind-open-data/exaSPIM_720164_.../ccf_alignment/registration_metadata/720164_10um_to_ccf_moved.nii.gz" >&2
+  echo "ERROR: both parameters are required — set them in the App Panel." >&2
+  echo "  transform_folder : e.g. /data/794491_transforms   (or an s3:// prefix of Transform*.h5)" >&2
+  echo "  input_volume     : e.g. /data/794491_10um_to_ccf_moved/794491_10um_to_ccf_moved.nii.gz" >&2
+  echo "                     (or the matching s3:// URI)" >&2
   exit 1
 fi
 
